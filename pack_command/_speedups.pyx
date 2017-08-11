@@ -1,85 +1,111 @@
-cdef extern from "stdlib.h":
-   void free(void* ptr)
-   void* malloc(size_t size)
-cdef extern from "string.h":
-    void *memcpy(void *dest, const void *src, size_t n)
-    size_t strlen(const char *s)
-cdef extern from "stdio.h":
-    int sprintf(char *str, const char *format, ...)
+cimport cython
 
-cdef char* encode(value):
+cdef extern from *:
+    long LONG_MAX
+
+cdef bytes SYM_STAR = b'*'
+cdef bytes SYM_DOLLAR = b'$'
+cdef bytes SYM_CRLF = b'\r\n'
+cdef bytes SYM_LF = b'\n'
+
+DEF CHAR_BIT = 8
+
+cdef bytes size_to_decimal_bytes(long n):
+    # sizeof(long)*CHAR_BIT/3+6
+    cdef char buf[32]
+    cdef char *p
+    cdef char *bufend
+    cdef unsigned long absn
+    cdef char c = '0'
+    p = bufend = buf + sizeof(buf)
+    if n < 0:
+        absn = 0UL - n
+    else:
+        absn = n
+    while True:
+        p -= 1
+        p[0] = c + (absn % 10)
+        absn /= 10
+        if absn == 0:
+            break
+    if n < 0:
+        p -= 1
+        p[0] = '-'
+    return p[:(bufend-p)]
+
+cdef bytes simple_bytes(s):
+    if isinstance(s, unicode):
+        return (<unicode>s).encode('latin-1')
+    elif isinstance(s, bytes):
+        return s
+    else:
+        s = str(s)
+        if isinstance(s, unicode):
+            return (<unicode>s).encode('latin-1')
+        else:
+            return s
+
+cdef bytes int_to_decimal_bytes(n):
+    if n <= LONG_MAX:
+        return size_to_decimal_bytes(n)
+    else:
+        return simple_bytes(str(n))
+
+cdef bytes _encode(value):
     "Return a bytestring representation of the value"
-    if isinstance(value, str):
-        return <char*>value
-    if isinstance(value, float):
-        value = repr(value)
-    if not isinstance(value, basestring):
+    if isinstance(value, bytes):
+        return value
+    elif isinstance(value, float):
+        return simple_bytes(repr(value))
+    elif isinstance(value, bool):
+        return str(value)
+    elif isinstance(value, (int, long)):
+        return int_to_decimal_bytes(value)
+    elif not isinstance(value, basestring):
         value = str(value)
+
     if isinstance(value, unicode):
-        value = value.encode('utf-8', 'strict')
-    return <char*>value
-
-cdef int intlen(int i):
-    cdef int n = 0
-
-    if (i < 0): 
-        n += 1
-        i = -i
-
-    n+=1
-    i /= 10
-
-    while i:
-        n+=1
-        i /= 10
-
-    return n
-
-cdef int bulklen(int n):
-    return 1+intlen(n)+2+n+2
+        value = (<unicode>value).encode('utf-8', 'strict')
+    return value
 
 def pack_command(*args):
     "Pack a series of arguments into a value Redis command"
-    cdef char *p
-    cdef int argc = len(args)
-    cdef int totlen = 1+intlen(argc)+2
-    cdef int llen 
-    cdef int pos
     cdef int i
-    cdef int *argvlen = <int *>malloc(sizeof(int *) *argc)
-    cdef char *cmd
+    cdef bytes enc_value, s
 
-    if not argvlen:
-        raise MemoryError()
+    args = tuple(args[0].split(' ')) + args[1:]
 
-    try:
-        for i in range(argc):
-            p = encode(args[i])
-            argvlen[i] = strlen(p)
-            totlen += bulklen(argvlen[i])
+    cdef list chunks = []
+    cdef list chunk = [SYM_STAR, size_to_decimal_bytes(len(args)), SYM_CRLF]
+    cdef int chunk_size = 0
+    for s in chunk:
+        chunk_size += len(s)
 
-        cmd = <char*>malloc(totlen+1)
+    for value in args:
+        enc_value = _encode(value)
 
-        if not cmd:
-            raise MemoryError()
+        if chunk_size > 6000 or len(enc_value) > 6000:
+            chunks.append(b''.join(chunk))
+            chunk = []
+            chunk_size = 0
 
-        pos = sprintf(cmd, "*%d\r\n", argc)
+        chunk.append(SYM_DOLLAR)
+        chunk_size += 1
 
-        for i in range(argc):
-            p = encode(args[i])
-            llen = argvlen[i]
-            pos += sprintf(cmd+pos,"$%zu\r\n",llen);
-            memcpy(cmd+pos,p,llen);
-            pos += llen;
-            cmd[pos] = '\r';
-            pos +=1
-            cmd[pos] = '\n';
-            pos +=1
+        lvalue = len(enc_value)
+        s = size_to_decimal_bytes(lvalue)
+        chunk.append(s)
+        chunk_size += len(s)
 
-        cmd[pos] = '\0';
-        return cmd
-    finally:
-        if cmd:
-            free(cmd)
-        if argvlen:
-            free(argvlen)
+        chunk.append(SYM_CRLF)
+        chunk_size += 2
+
+        chunk.append(enc_value)
+        chunk_size += lvalue
+
+        chunk.append(SYM_CRLF)
+        chunk_size += 2
+
+    if chunk:
+        chunks.append(b''.join(chunk))
+    return chunks

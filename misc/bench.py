@@ -12,19 +12,19 @@ def format_time(seconds):
     v = seconds
 
     if v * 1000 * 1000 * 1000 < 1000:
-        scale = u'ns'
+        scale = 'ns'
         v = int(round(v*1000*1000*1000))
     elif v * 1000 * 1000 < 1000:
-        scale = u'μs'
+        scale = 'μs'
         v = int(round(v*1000*1000))
     elif v * 1000 < 1000:
-        scale = u'ms'
+        scale = 'ms'
         v = round(v*1000, 4)
     else:
-        scale = u'sec'
+        scale = 'sec'
         v = int(v)
 
-    return u'{} {}'.format(v, scale)
+    return '{} {}'.format(v, scale)
 
 # profiler size
 number = 100000
@@ -54,12 +54,12 @@ if timer:
         min_run = min(res)
         per_loop = min_run/number
 
-        print u'{}'.format(name)
-        print u'{} total run'.format(format_time(min_run))
-        print u'{} per/loop'.format(format_time(per_loop))
+        print('{}'.format(name))
+        print('{} total run'.format(format_time(min_run)))
+        print('{} per/loop'.format(format_time(per_loop)))
         #print u'{} per/friend'.format(format_time(per_loop/friends_cnt))
 else:
-    for j in xrange(number):
+    for j in range(number):
         runit()
 
 if graph:

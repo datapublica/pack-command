@@ -7,4 +7,4 @@ class MyConnection(redis.Connection):
 pool = redis.ConnectionPool(connection_class=MyConnection)
 
 conn = redis.StrictRedis(connection_pool=pool)
-print conn.exists('foo')
+print(conn.exists('foo'))
